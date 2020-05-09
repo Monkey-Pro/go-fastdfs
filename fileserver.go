@@ -258,6 +258,14 @@ type WrapReqResp struct {
 	r    *http.Request
 	done chan bool
 }
+
+//by mywaystay
+type APIResponse struct {
+	Code int         `json:"code"`
+	Msg  string      `json:"msg,omitempty"`
+	Data interface{} `json:"data,omitempty"`
+}
+
 type JsonResult struct {
 	Message string      `json:"message"`
 	Status  string      `json:"status"`
@@ -1024,6 +1032,50 @@ func (this *Server) CheckAuth(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+//鉴权并返回响应信息
+//by mywaystay
+func (this *Server) CheckAuthWithInfo(w http.ResponseWriter, r *http.Request) (bool, interface{}) {
+	var (
+		err    error
+		req    *httplib.BeegoHTTPRequest
+		result string
+		//jsonResult JsonResult
+		jsonResult APIResponse
+	)
+	if err = r.ParseForm(); err != nil {
+		log.Error(err)
+		return false, jsonResult.Data
+	}
+	req = httplib.Post(Config().AuthUrl)
+	req.SetTimeout(time.Second*10, time.Second*10)
+	req.Param("__path__", r.URL.Path)
+	req.Param("__query__", r.URL.RawQuery)
+	for k, _ := range r.Form {
+		req.Param(k, r.FormValue(k))
+	}
+	for k, v := range r.Header {
+		req.Header(k, v[0])
+	}
+	result, err = req.String()
+	result = strings.TrimSpace(result)
+	if strings.HasPrefix(result, "{") && strings.HasSuffix(result, "}") {
+		if err = json.Unmarshal([]byte(result), &jsonResult); err != nil {
+			log.Error(err)
+			return false, nil
+		}
+		if jsonResult.Code != 1 {
+			log.Warn(result)
+			return false, nil
+		}
+	} else {
+		if result != "ok" {
+			log.Warn(result)
+			return false, nil
+		}
+	}
+	return true, jsonResult.Data
 }
 
 func (this *Server) NotPermit(w http.ResponseWriter, r *http.Request) {
@@ -2501,10 +2553,12 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		output       string
 		fileResult   FileResult
 		result       JsonResult
-		data         []byte
-		code         string
-		secret       interface{}
-		msg          string
+		//apiResponse  APIResponse
+		data     []byte
+		code     string
+		secret   interface{}
+		msg      string
+		filePath string //by mywaystay 授权返回的自定义path
 	)
 	output = r.FormValue("output")
 	if Config().EnableCrossOrigin {
@@ -2514,16 +2568,35 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	result.Status = "fail"
+	//if Config().AuthUrl != "" {
+	//	if !this.CheckAuth(w, r) {
+	//		msg = "auth fail"
+	//		log.Warn(msg, r.Form)
+	//		this.NotPermit(w, r)
+	//		result.Message = msg
+	//		w.Write([]byte(this.util.JsonEncodePretty(result)))
+	//		return
+	//	}
+	//}
+
+	//by mywaystay
 	if Config().AuthUrl != "" {
-		if !this.CheckAuth(w, r) {
+		isAuth, resData := this.CheckAuthWithInfo(w, r)
+		if !isAuth {
 			msg = "auth fail"
 			log.Warn(msg, r.Form)
 			this.NotPermit(w, r)
 			result.Message = msg
 			w.Write([]byte(this.util.JsonEncodePretty(result)))
 			return
+		} else {
+			log.Infof("resData===>>>%v", resData)
+			if outpath, ok := (resData.(map[string]interface{}))["outpath"]; ok {
+				filePath = outpath.(string)
+			}
 		}
 	}
+
 	if r.Method == http.MethodPost {
 		md5sum = r.FormValue("md5")
 		fileName = r.FormValue("filename")
@@ -2537,6 +2610,9 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 		if Config().EnableCustomPath {
 			fileInfo.Path = r.FormValue("path")
+			if fileInfo.Path == "" {
+				fileInfo.Path = filePath
+			}
 			fileInfo.Path = strings.Trim(fileInfo.Path, "/")
 		}
 		scene = r.FormValue("scene")
@@ -2572,10 +2648,11 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 			scene = Config().DefaultScene
 		}
 		if output == "" {
-			output = "text"
+			//output = "text"
+			output = "JSON"
 		}
-		if !this.util.Contains(output, []string{"json", "text", "json2"}) {
-			msg = "output just support json or text or json2"
+		if !this.util.Contains(output, []string{"json", "text", "json2", "JSON"}) {
+			msg = "output just support json or text or json2 or JSON"
 			result.Message = msg
 			log.Warn(msg)
 			w.Write([]byte(this.util.JsonEncodePretty(result)))
@@ -2611,10 +2688,20 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 					if output == "json2" {
 						result.Data = fileResult
 						result.Status = "ok"
+						w.Header().Set("Content-Type", "application/json")
 						w.Write([]byte(this.util.JsonEncodePretty(result)))
 						return
 					}
 					w.Write([]byte(this.util.JsonEncodePretty(fileResult)))
+				} else if output == "JSON" { //by mywaystay
+					w.Header().Set("Content-Type", "application/json")
+					result.Status = "ok"
+					result.Data = map[string]interface{}{
+						//"url":  fileResult.Url,
+						"md5":  fileResult.Md5,
+						"size": fileResult.Size,
+					}
+					w.Write([]byte(this.util.JsonEncodePretty(result)))
 				} else {
 					w.Write([]byte(fileResult.Url))
 				}
@@ -2659,6 +2746,7 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		fileResult = this.BuildFileResult(&fileInfo, r)
 
 		if output == "json" || output == "json2" {
+			w.Header().Set("Content-Type", "application/json")
 			if output == "json2" {
 				result.Data = fileResult
 				result.Status = "ok"
@@ -2666,6 +2754,15 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Write([]byte(this.util.JsonEncodePretty(fileResult)))
+		} else if output == "JSON" { //by mywaystay
+			w.Header().Set("Content-Type", "application/json")
+			result.Status = "ok"
+			result.Data = map[string]interface{}{
+				//"url":  fileResult.Url,
+				"md5":  fileResult.Md5,
+				"size": fileResult.Size,
+			}
+			w.Write([]byte(this.util.JsonEncodePretty(result)))
 		} else {
 			w.Write([]byte(fileResult.Url))
 		}
@@ -2698,6 +2795,15 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Write(data)
+		} else if output == "JSON" {
+			w.Header().Set("Content-Type", "application/json")
+			result.Status = "ok"
+			result.Data = map[string]interface{}{
+				//"url":  fileResult.Url,
+				"md5":  fileResult.Md5,
+				"size": fileResult.Size,
+			}
+			w.Write([]byte(this.util.JsonEncodePretty(result)))
 		} else {
 			w.Write([]byte(fileResult.Url))
 		}
@@ -3829,15 +3935,15 @@ func init() {
 		fmt.Printf("%s\n%s\n%s\n%s\n", VERSION, BUILD_TIME, GO_VERSION, GIT_VERSION)
 		os.Exit(0)
 	}
-	appDir, e1 := filepath.Abs(filepath.Dir(os.Args[0]))
-	curDir, e2 := filepath.Abs(".")
-	if e1 == nil && e2 == nil && appDir != curDir && !strings.Contains(appDir, "go-build") {
-		msg := fmt.Sprintf("please change directory to '%s' start fileserver\n", appDir)
-		msg = msg + fmt.Sprintf("请切换到 '%s' 目录启动 fileserver ", appDir)
-		log.Warn(msg)
-		fmt.Println(msg)
-		os.Exit(1)
-	}
+	//appDir, e1 := filepath.Abs(filepath.Dir(os.Args[0]))
+	//curDir, e2 := filepath.Abs(".")
+	//if e1 == nil && e2 == nil && appDir != curDir && !strings.Contains(appDir, "go-build") {
+	//	msg := fmt.Sprintf("please change directory to '%s' start fileserver\n", appDir)
+	//	msg = msg + fmt.Sprintf("请切换到 '%s' 目录启动 fileserver ", appDir)
+	//	log.Warn(msg)
+	//	fmt.Println(msg)
+	//	os.Exit(1)
+	//}
 	DOCKER_DIR = os.Getenv("GO_FASTDFS_DIR")
 	if DOCKER_DIR != "" {
 		if !strings.HasSuffix(DOCKER_DIR, "/") {
