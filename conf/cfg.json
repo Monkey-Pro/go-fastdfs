@@ -55,6 +55,8 @@
 	"enable_migrate": false,
 	"文件是否去重": "默认去重",
 	"enable_distinct_file": true,
+	"图片是否缩放": "默认是",
+	"enable_image_resize": true,
 	"是否开启跨站访问": "默认开启",
 	"enable_cross_origin": true,
 	"是否开启Google认证，实现安全的上传、下载": "默认不开启",

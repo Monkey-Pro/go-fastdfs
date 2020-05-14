@@ -248,6 +248,7 @@ type FileInfo struct {
 	OffSet    int64    `json:"offset"`
 	retry     int
 	op        string
+	FileType  int `json:"fileType"` //文件类型
 }
 type FileLog struct {
 	FileInfo *FileInfo
@@ -280,10 +281,11 @@ type FileResult struct {
 	Size    int64  `json:"size"`
 	ModTime int64  `json:"mtime"`
 	//Just for Compatibility
-	Scenes  string `json:"scenes"`
-	Retmsg  string `json:"retmsg"`
-	Retcode int    `json:"retcode"`
-	Src     string `json:"src"`
+	Scenes   string `json:"scenes"`
+	Retmsg   string `json:"retmsg"`
+	Retcode  int    `json:"retcode"`
+	Src      string `json:"src"`
+	FileType int    `json:"fileType"`
 }
 type Mail struct {
 	User     string `json:"user"`
@@ -2403,7 +2405,7 @@ func (this *Server) BuildFileResult(fileInfo *FileInfo, r *http.Request) FileRes
 	fileResult.ModTime = fileInfo.TimeStamp
 	// Just for Compatibility
 	fileResult.Src = fileResult.Path
-	fileResult.Scenes = fileInfo.Scene
+	fileResult.FileType = fileInfo.FileType
 	return fileResult
 }
 func (this *Server) SaveUploadFile(file multipart.File, header *multipart.FileHeader, fileInfo *FileInfo, r *http.Request) (*FileInfo, error) {
@@ -2554,11 +2556,12 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		fileResult   FileResult
 		result       JsonResult
 		//apiResponse  APIResponse
-		data     []byte
-		code     string
-		secret   interface{}
-		msg      string
-		filePath string //by mywaystay 授权返回的自定义path
+		data        []byte
+		code        string
+		secret      interface{}
+		msg         string
+		filePath    string //by mywaystay 授权返回的自定义path
+		fileTypeStr string //by mywaystay 文件类型
 	)
 	output = r.FormValue("output")
 	if Config().EnableCrossOrigin {
@@ -2601,6 +2604,7 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		md5sum = r.FormValue("md5")
 		fileName = r.FormValue("filename")
 		output = r.FormValue("output")
+		fileTypeStr = r.FormValue("fileType") //by mywaystay
 		if Config().ReadOnly {
 			msg = "(error) readonly"
 			result.Message = msg
@@ -2636,6 +2640,13 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 		fileInfo.Md5 = md5sum
 		fileInfo.ReName = fileName
 		fileInfo.OffSet = -1
+		//by mywaystay
+		if fileTypeStr != "" {
+			_fileType, err := strconv.Atoi(fileTypeStr)
+			if err != nil {
+				fileInfo.FileType = _fileType
+			}
+		}
 		if uploadFile, uploadHeader, err = r.FormFile("file"); err != nil {
 			log.Error(err)
 			result.Message = err.Error()
@@ -3886,6 +3897,9 @@ func (this *Server) Index(w http.ResponseWriter, r *http.Request) {
 					  <input type="text" id="output" name="output" value="json2" title="json|text|json2" /></span>
 					<span class="form-line">自定义路径(path):
 					  <input type="text" id="path" name="path" value="" /></span>
+					 <!--by mywaystay-->
+					<span class="form-line">文件类型:
+					  <input type="text" id="fileType" name="fileType" value="1101" /></span>
 	              <span class="form-line">google认证码(code):
 					  <input type="text" id="code" name="code" value="" /></span>
 					 <span class="form-line">自定义认证(auth_token):
@@ -3908,7 +3922,9 @@ func (this *Server) Index(w http.ResponseWriter, r *http.Request) {
 					 // console.log(result) console.log('Upload complete! We’ve uploaded these files:', result.successful)
 					})
 					//uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca',callback_url:'http://127.0.0.1/callback' ,filename:'自定义文件名','path':'自定义path',scene:'自定义场景' })//这里是传递上传的认证参数,callback_url参数中 id为文件的ID,info 文转的基本信息json
-					uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca',callback_url:'http://127.0.0.1/callback'})//自定义参数与普通上传类似（虽然支持自定义，建议不要自定义，海量文件情况下，自定义很可能给自已给埋坑）
+					// uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca',callback_url:'http://127.0.0.1/callback',fileType:1402})//自定义参数与普通上传类似（虽然支持自定义，建议不要自定义，海量文件情况下，自定义很可能给自已给埋坑）
+					// uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca', scene:'truth', fileType:1402})//自定义参数与普通上传类似（虽然支持自定义，建议不要自定义，海量文件情况下，自定义很可能给自已给埋坑）
+					uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca', scene:'truth', fileType:1402})//自定义参数与普通上传类似（虽然支持自定义，建议不要自定义，海量文件情况下，自定义很可能给自已给埋坑）
                 </script>
 				</div>
 			  </body>
@@ -4084,28 +4100,48 @@ func (err httpError) Body() []byte {
 }
 func (store hookDataStore) NewUpload(info tusd.FileInfo) (id string, err error) {
 	var (
-		jsonResult JsonResult
+		jsonResult  JsonResult
+		apiResponse APIResponse
 	)
 	if Config().AuthUrl != "" {
 		if auth_token, ok := info.MetaData["auth_token"]; !ok {
-			msg := "token auth fail,auth_token is not in http header Upload-Metadata," +
-				"in uppy uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca' })"
+			//msg := "token auth fail,auth_token is not in http header Upload-Metadata," +
+			//	"in uppy uppy.setMeta({ auth_token: '9ee60e59-cb0f-4578-aaba-29b9fc2919ca' })"
+			msg := "auth fail"
 			log.Error(msg, fmt.Sprintf("current header:%v", info.MetaData))
 			return "", httpError{error: errors.New(msg), statusCode: 401}
 		} else {
 			req := httplib.Post(Config().AuthUrl)
 			req.Param("auth_token", auth_token)
+			req.Param("fileType", info.MetaData["fileType"])
+			req.Param("scene", info.MetaData["scene"])
+
 			req.SetTimeout(time.Second*5, time.Second*10)
 			content, err := req.String()
 			content = strings.TrimSpace(content)
 			if strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}") {
-				if err = json.Unmarshal([]byte(content), &jsonResult); err != nil {
-					log.Error(err)
-					return "", httpError{error: errors.New(err.Error() + content), statusCode: 401}
+				if strings.Contains(content, `"code":`) { // by mywaystay
+					if err = json.Unmarshal([]byte(content), &apiResponse); err != nil {
+						log.Error(err)
+						return "", httpError{error: errors.New(err.Error() + content), statusCode: 401}
+					}
+					if apiResponse.Code != 1 {
+						return "", httpError{error: errors.New(content), statusCode: 401}
+					}
+					//by mywaystay 设置outpath
+					if outpath, ok := (apiResponse.Data.(map[string]interface{}))["outpath"]; ok {
+						info.MetaData["outpath"] = outpath.(string)
+					}
+				} else { //兼容旧数据
+					if err = json.Unmarshal([]byte(content), &jsonResult); err != nil {
+						log.Error(err)
+						return "", httpError{error: errors.New(err.Error() + content), statusCode: 401}
+					}
+					if jsonResult.Data != "ok" {
+						return "", httpError{error: errors.New(content), statusCode: 401}
+					}
 				}
-				if jsonResult.Data != "ok" {
-					return "", httpError{error: errors.New(content), statusCode: 401}
-				}
+
 			} else {
 				if err != nil {
 					log.Error(err)
@@ -4173,9 +4209,25 @@ func (this *Server) initTus() {
 			return nil, err
 		} else {
 			if Config().AuthUrl != "" {
-				fileResult := this.util.JsonEncodePretty(this.BuildFileResult(fi, nil))
-				bufferReader := bytes.NewBuffer([]byte(fileResult))
-				return bufferReader, nil
+				//fileResult := this.util.JsonEncodePretty(this.BuildFileResult(fi, nil))
+				//bufferReader := bytes.NewBuffer([]byte(fileResult))
+
+				fileResult := this.BuildFileResult(fi, nil)
+				if fileResult.FileType > 0 {
+					var result JsonResult
+					result.Status = "ok"
+					result.Data = map[string]interface{}{
+						//"url":  fileResult.Url,
+						"md5":  fileResult.Md5,
+						"size": fileResult.Size,
+					}
+					bufferReader := bytes.NewBuffer([]byte(this.util.JsonEncodePretty(result)))
+					return bufferReader, nil
+				} else {
+					bufferReader := bytes.NewBuffer([]byte(this.util.JsonEncodePretty(fileResult)))
+					return bufferReader, nil
+				}
+
 			}
 			fn = fi.Name
 			if fi.ReName != "" {
@@ -4230,6 +4282,9 @@ func (this *Server) initTus() {
 				log.Info("CompleteUploads", info)
 				name := ""
 				pathCustom := ""
+				fileType := 0
+				outpath := ""
+
 				scene := Config().DefaultScene
 				if v, ok := info.MetaData["filename"]; ok {
 					name = v
@@ -4240,6 +4295,18 @@ func (this *Server) initTus() {
 				if v, ok := info.MetaData["path"]; ok {
 					pathCustom = v
 				}
+				//by mywaystay 扩展属性
+				if v, ok := info.MetaData["fileType"]; ok && v != "" {
+					_fileType, err := strconv.Atoi(v)
+					if err == nil {
+						fileType = _fileType
+					}
+				}
+				if v, ok := info.MetaData["outpath"]; ok {
+					outpath = v
+					outpath = strings.TrimRight(outpath, "/")
+				}
+
 				var err error
 				md5sum := ""
 				oldFullPath := BIG_DIR + "/" + info.ID + ".bin"
@@ -4265,6 +4332,10 @@ func (this *Server) initTus() {
 				if pathCustom != "" {
 					newFullPath = STORE_DIR + "/" + scene + fpath + filename
 				}
+				//by mywaystay 设置自定义路径
+				if outpath != "" {
+					newFullPath = STORE_DIR + "/" + outpath + "/" + filename
+				}
 				if fi, err := this.GetFileInfoFromLevelDB(md5sum); err != nil {
 					log.Error(err)
 				} else {
@@ -4288,6 +4359,12 @@ func (this *Server) initTus() {
 					fpath2 = strings.TrimRight(fpath2, "/")
 				}
 
+				//by mywaystay 设置自定义路径
+				if outpath != "" {
+					fpath2 = STORE_DIR_NAME + "/" + outpath
+					fpath2 = strings.TrimRight(fpath2, "/")
+				}
+
 				os.MkdirAll(DOCKER_DIR+fpath2, 0775)
 				fileInfo := &FileInfo{
 					Name:      name,
@@ -4295,9 +4372,11 @@ func (this *Server) initTus() {
 					ReName:    filename,
 					Size:      info.Size,
 					TimeStamp: timeStamp,
+					Scene:     scene,
 					Md5:       md5sum,
 					Peers:     []string{this.host},
 					OffSet:    -1,
+					FileType:  fileType,
 				}
 				if err = os.Rename(oldFullPath, newFullPath); err != nil {
 					log.Error(err)
