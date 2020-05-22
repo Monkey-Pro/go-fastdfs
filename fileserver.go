@@ -2632,7 +2632,7 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					result.Status = "ok"
 					result.Data = map[string]interface{}{
-						//"url":  fileResult.Url,
+						"url":  fileResult.Url,
 						"md5":  fileResult.Md5,
 						"size": fileResult.Size,
 					}
@@ -2693,7 +2693,7 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			result.Status = "ok"
 			result.Data = map[string]interface{}{
-				//"url":  fileResult.Url,
+				"url":  fileResult.Url,
 				"md5":  fileResult.Md5,
 				"size": fileResult.Size,
 			}
@@ -2730,11 +2730,11 @@ func (this *Server) upload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Write(data)
-		} else if output == "JSON" {
+		} else if output == "JSON" { //by mywaystay
 			w.Header().Set("Content-Type", "application/json")
 			result.Status = "ok"
 			result.Data = map[string]interface{}{
-				//"url":  fileResult.Url,
+				"url":  fileResult.Url,
 				"md5":  fileResult.Md5,
 				"size": fileResult.Size,
 			}
