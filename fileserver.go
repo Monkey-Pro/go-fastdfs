@@ -4141,7 +4141,7 @@ func (this *Server) initTus() {
 					var result JsonResult
 					result.Status = "ok"
 					result.Data = map[string]interface{}{
-						//"url":  fileResult.Url,
+						"url":  fileResult.Url,
 						"md5":  fileResult.Md5,
 						"size": fileResult.Size,
 					}
