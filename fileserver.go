@@ -1029,6 +1029,7 @@ func (this *Server) CheckAuthWithInfo(w http.ResponseWriter, r *http.Request) (b
 		result string
 		//jsonResult JsonResult
 		jsonResult APIResponse
+		isPeer     bool
 	)
 	if err = r.ParseForm(); err != nil {
 		log.Error(err)
@@ -1038,6 +1039,9 @@ func (this *Server) CheckAuthWithInfo(w http.ResponseWriter, r *http.Request) (b
 	req.SetTimeout(time.Second*10, time.Second*10)
 	req.Param("__path__", r.URL.Path)
 	req.Param("__query__", r.URL.RawQuery)
+	isPeer = this.IsPeer(r)
+	req.Param("__isPeer__", strconv.FormatBool(isPeer))
+
 	for k, _ := range r.Form {
 		req.Param(k, r.FormValue(k))
 	}
