@@ -4214,7 +4214,7 @@ func (this *Server) initTus() {
 		for {
 			select {
 			case info := <-handler.CompleteUploads:
-				log.Info("CompleteUploads", info)
+				log.Infof("CompleteUploads info=%#v", info)
 				name := ""
 				pathCustom := ""
 				fileType := 0
@@ -4239,6 +4239,7 @@ func (this *Server) initTus() {
 				}
 				if v, ok := info.MetaData["outpath"]; ok {
 					outpath = v
+					outpath = strings.TrimLeft(outpath, "/")
 					outpath = strings.TrimRight(outpath, "/")
 				}
 
@@ -4318,6 +4319,7 @@ func (this *Server) initTus() {
 					continue
 				}
 				log.Info(fileInfo)
+				log.Infof("fileInfo=%#v", info)
 				os.Remove(infoFullPath)
 				if _, err = this.SaveFileInfoToLevelDB(info.ID, fileInfo, this.ldb); err != nil {
 					//assosiate file id
